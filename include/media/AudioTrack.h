@@ -616,6 +616,7 @@ protected:
 
                 void        pause();    // suspend thread from execution at next loop boundary
                 void        resume();   // allow thread to execute, if not requested to exit
+                void        pauseSync();
 
     private:
                 void        pauseInternal(nsecs_t ns = 0LL);
@@ -631,6 +632,8 @@ protected:
         bool                mPausedInt; // whether thread internally requests pause
         nsecs_t             mPausedNs;  // if mPausedInt then associated timeout, otherwise ignored
         bool                mIgnoreNextPausedInt;   // whether to ignore next mPausedInt request
+        bool                mCmdAckPending;
+        Condition           mCmdAck;
     };
 
             // body of AudioTrackThread::threadLoop()
@@ -679,7 +682,7 @@ protected:
     sp<AudioTrackThread>    mAudioTrackThread;
     float                   mVolume[2];
     float                   mSendLevel;
-    uint32_t                mSampleRate;
+    mutable uint32_t        mSampleRate;            // mutable because getSampleRate() can update it.
     size_t                  mFrameCount;            // corresponds to current IAudioTrack
     size_t                  mReqFrameCount;         // frame count to request the next time a new
                                                     // IAudioTrack is needed
