@@ -74,21 +74,29 @@ void ExtendedUtils::HFR::setHFRIfEnabled(
     int32_t hfr = -1;
     if ( hfr_str != NULL ) {
         hfr = atoi(hfr_str);
-    }
-    if (hfr < 0) {
-        ALOGW("Invalid hfr value(%d) set from app. Disabling HFR.", hfr);
-        hfr = 0;
+        if(hfr > 0) {
+            ALOGI("HFR enabled, %d value provided", hfr);
+            meta->setInt32(kKeyHFR, hfr);
+            return;
+        } else {
+            ALOGI("Invalid hfr value(%d) set from app. Disabling HFR.", hfr);
+        }
     }
 
-#if 0
+#ifndef LEGACY_MEDIA
     const char *hsr_str = params.get("video-hsr");
-
-    if(hsr_str && !strncmp(hsr_str,"on",2)) {
-         ALOGI("HSR [%d] ON",hfr);
-         meta->setInt32(kKeyHSR, hfr);
-    } else
+    int32_t hsr = -1;
+    if(hsr_str != NULL ) {
+        hsr = atoi(hsr_str);
+        if(hsr > 0) {
+            ALOGI("HSR enabled, %d value provided", hsr);
+            meta->setInt32(kKeyHSR, hsr);
+            return;
+        } else {
+            ALOGI("Invalid hsr value(%d) set from app. Disabling HSR.", hsr);
+        }
+    }
 #endif
-         meta->setInt32(kKeyHFR, hfr);
 }
 
 status_t ExtendedUtils::HFR::initializeHFR(
@@ -96,7 +104,7 @@ status_t ExtendedUtils::HFR::initializeHFR(
         int64_t &maxFileDurationUs, video_encoder videoEncoder) {
     status_t retVal = OK;
 
-#if 0
+#ifndef LEGACY_MEDIA
     //Check HSR first, if HSR is enable set HSR to kKeyFrameRate
     int32_t hsr =0;
     if (meta->findInt32(kKeyHSR, &hsr)) {
@@ -797,7 +805,9 @@ void VSyncLocker::VSyncEvent() {
         }
     } while (!mExitVsyncEvent);
     mDisplayEventReceiver.setVsyncRate(0);
-    mLooper->removeFd(mDisplayEventReceiver.getFd());
+    if (mLooper != NULL) {
+        mLooper->removeFd(mDisplayEventReceiver.getFd());
+    }
 }
 
 void VSyncLocker::signalVSync() {
@@ -1015,14 +1025,36 @@ void ExtendedUtils::parseRtpPortRangeFromSystemProperty(unsigned *start, unsigne
 #if defined(ENABLE_AV_ENHANCEMENTS) || defined(ENABLE_OFFLOAD_ENHANCEMENTS)
 namespace android {
 
-void ExtendedUtils::updateOutputBitWidth(sp<MetaData> format, bool isOffload) {
+bool ExtendedUtils::isHiresAudioEnabled() {
     char value[PROPERTY_VALUE_MAX] = {0};
     property_get("audio.offload.24bit.enable", value, "0");
+    return atoi(value) == 1;
+}
+
+void ExtendedUtils::updateOutputBitWidth(sp<MetaData> format, bool isOffload) {
     int32_t bitWidth = 16;
     if (format->findInt32(kKeySampleBits, &bitWidth)) {
-        if (!((bitWidth == 24) && isOffload && atoi(value))) {
+        if (!((bitWidth == 24) && isOffload && isHiresAudioEnabled())) {
             format->setInt32(kKeySampleBits, 16);
         }
+    }
+}
+
+void ExtendedUtils::printFileName(int fd) {
+    if (fd) {
+        char symName[40] = {0};
+        char fileName[256] = {0};
+        snprintf(symName, sizeof(symName), "/proc/%d/fd/%d", getpid(), fd);
+
+        if (readlink(symName, fileName, (sizeof(fileName) - 1)) != -1 ) {
+            ALOGD("printFileName fd(%d) -> %s", fd, fileName);
+        }
+    }
+}
+
+void ExtendedUtils::printFileName(const char *uri) {
+    if (uri) {
+        ALOGD("printFileName %s", uri);
     }
 }
 

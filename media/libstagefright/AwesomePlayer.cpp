@@ -386,11 +386,9 @@ status_t AwesomePlayer::setDataSource_l(
     reset_l();
 
     mUri = uri;
-    if (uri) {
-        printFileName(uri);
-    }
 
 #ifdef ENABLE_AV_ENHANCEMENTS
+    ExtendedUtils::printFileName(uri);
     ExtendedUtils::prefetchSecurePool(uri);
 #endif
 
@@ -429,12 +427,10 @@ status_t AwesomePlayer::setDataSource(
 
     ALOGD("Before reset_l");
     reset_l();
-    if (fd) {
-       printFileName(fd);
-    }
 
 #ifdef ENABLE_AV_ENHANCEMENTS
     if (fd) {
+        ExtendedUtils::printFileName(fd);
         ExtendedUtils::prefetchSecurePool(fd);
     }
 #endif
@@ -809,16 +805,18 @@ void AwesomePlayer::onVideoLagUpdate() {
     }
     mVideoLagEventPending = false;
 
-    int64_t audioTimeUs = mAudioPlayer->getMediaTimeUs();
-    int64_t videoLateByUs = audioTimeUs - mVideoTimeUs;
+    if (!(mFlags & AUDIO_AT_EOS)) {
+        int64_t audioTimeUs = mAudioPlayer->getMediaTimeUs();
+        int64_t videoLateByUs = audioTimeUs - mVideoTimeUs;
 
-    if (!(mFlags & VIDEO_AT_EOS) && videoLateByUs > 300000ll) {
-        ALOGV("video late by %lld ms.", videoLateByUs / 1000ll);
+        if (!(mFlags & VIDEO_AT_EOS) && videoLateByUs > 300000ll) {
+            ALOGV("video late by %lld ms.", videoLateByUs / 1000ll);
 
-        notifyListener_l(
-                MEDIA_INFO,
-                MEDIA_INFO_VIDEO_TRACK_LAGGING,
-                videoLateByUs / 1000ll);
+            notifyListener_l(
+                    MEDIA_INFO,
+                    MEDIA_INFO_VIDEO_TRACK_LAGGING,
+                    videoLateByUs / 1000ll);
+        }
     }
 
     postVideoLagEvent_l();
@@ -1664,7 +1662,13 @@ status_t AwesomePlayer::getPosition(int64_t *positionUs) {
         Mutex::Autolock autoLock(mMiscStateLock);
         *positionUs = mVideoTimeUs;
     } else if (mAudioPlayer != NULL) {
-        *positionUs = mAudioPlayer->getMediaTimeUs();
+        Mutex::Autolock autoLock(mMiscStateLock);
+        if (mAudioTearDownPosition == 0) {
+            *positionUs = mAudioPlayer->getMediaTimeUs();
+        } else {
+            /* AudioTearDown in progress */
+            *positionUs = mAudioTearDownPosition;
+        }
     } else {
         *positionUs = mAudioTearDownPosition;
     }
@@ -1929,6 +1933,9 @@ status_t AwesomePlayer::initAudioDecoder() {
             mAudioSource = mAudioTrack;
 #ifndef QCOM_DIRECTTRACK
         } else {
+            if (mOmxSource != NULL) {
+                mOmxSource->getFormat()->setInt32(kKeySampleBits, 16);
+            }
             mAudioSource = mOmxSource;
 #endif
         }
@@ -1940,7 +1947,7 @@ status_t AwesomePlayer::initAudioDecoder() {
     mAudioTrack->getFormat()->findInt32(kKeySampleBits, &bitsPerSample);
 
     if (!mOffloadAudio && mAudioSource != NULL) {
-        ALOGI("Could not offload audio decode, try pcm offload");
+        ALOGI("Could not offload audio decode, try pcm offload (%d-bit)", bitsPerSample);
         sp<MetaData> format = mAudioSource->getFormat();
         if (durationUs >= 0) {
             format->setInt64(kKeyDuration, durationUs);
@@ -2426,6 +2433,7 @@ void AwesomePlayer::onVideoEvent() {
         }
 
         if (latenessUs > 500000ll
+                && !(mFlags & AUDIO_AT_EOS)
                 && mAudioPlayer != NULL
                 && mAudioPlayer->getMediaTimeMapping(
                     &realTimeUs, &mediaTimeUs)) {
@@ -3078,6 +3086,7 @@ void AwesomePlayer::finishAsyncPrepare_l() {
         if (mPrepareResult == OK) {
             if (mExtractorFlags & MediaExtractor::CAN_SEEK) {
                 seekTo_l(mAudioTearDownPosition);
+                mAudioTearDownPosition = 0;
             }
 
             if (mAudioTearDownWasPlaying) {

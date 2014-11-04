@@ -526,6 +526,16 @@ sp<IAudioTrack> AudioFlinger::createTrack(
             goto Exit;
         }
 
+        {
+            Mutex::Autolock _l(thread->mLock);
+            // avoid two active tracks added to offload thread
+            if (thread->mType == PlaybackThread::OFFLOAD && (thread->mActiveTracks.size() > 0)) {
+                ALOGD("decline track creation for offload as an active track already exsits");
+                lStatus = BAD_VALUE;
+                goto Exit;
+            }
+        }
+
         pid_t pid = IPCThreadState::self()->getCallingPid();
 
         client = registerPid_l(pid);
@@ -1580,11 +1590,11 @@ sp<IAudioRecord> AudioFlinger::openRecord(
         goto Exit;
     }
 #else
-#if defined(QCOM_HARDWARE)
+#ifdef QCOM_HARDWARE
     if (format != AUDIO_FORMAT_PCM_16_BIT &&
             !audio_is_compress_voip_format(format) &&
             !audio_is_compress_capture_format(format)) {
-#else 
+#else
     if (format != AUDIO_FORMAT_PCM_16_BIT) {
 #endif
         ALOGE("openRecord() invalid format %d", format);
